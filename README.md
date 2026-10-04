@@ -40,7 +40,13 @@ xcodebuild -project Translator.xcodeproj -scheme Translator \
   -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build
 ```
 
-## 수동 검증 항목
+## Windows에서 무료 클라우드 빌드
+
+`.github/workflows/build-ios.yml`을 저장소에 올린 후 GitHub Actions → Build iOS IPA → Run workflow로 실행합니다. 공개 저장소의 표준 macOS runner를 사용합니다. 빌드 성공 시 실행 페이지의 Artifacts에서 `Translator-unsigned-IPA`를 내려받고 ZIP을 풀면 `Translator-unsigned.ipa`가 나옵니다. 실패 로그도 `ios-build-log`로 보관합니다.
+
+이 IPA는 서명되지 않았으므로 iPhone에서 바로 열어 설치할 수 없습니다. Windows의 Sideloadly 등에서 본인의 무료 Apple 계정으로 앱과 확장을 서명하는 별도 설치 과정이 필요합니다. 키보드를 유지하려면 확장 제거 옵션을 사용하지 마세요. 무료 서명은 주기적인 갱신이 필요합니다. 클라우드 빌드 및 이 확장의 실제 사이드로딩은 아직 미검증이며, 성공한 빌드와 기기 테스트를 통해 확인해야 합니다. 계정 비밀번호나 인증서는 저장소에 올리지 마세요.
+
+## 기기에서 확인할 항목
 
 - 영문 키, space, 삭제, 줄바꿈이 활성 입력창에 반영되는지 확인합니다.
 - 기본 한국어 키보드로 원문을 작성한 후 Translator로 전환해도 Translate가 작동하는지 확인합니다. 이번 버전은 한글 조합 입력기를 구현하지 않으며 예문 버튼을 제공합니다.
