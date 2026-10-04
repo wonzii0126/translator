@@ -12,47 +12,109 @@ final class KeyboardViewController: UIInputViewController {
     private var letterButtons: [UIButton] = []
     private var shiftButton: UIButton!
     private var languageButton: UIButton!
+    private let keyRows = UIStackView()
+    private var isNumbers = false
+    private var alternateSymbols = false
+    private var sourceButton: UIButton!
+    private var targetButton: UIButton!
+    private var toneButton: UIButton!
+    private var numberButton: UIButton!
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemGray5
         status.font = .systemFont(ofSize: 12)
         status.textAlignment = .center
-        status.numberOfLines = 2
-        status.text = "KO → IT · casual · 테스트 번역"
+        status.numberOfLines = 1
+        status.adjustsFontSizeToFitWidth = true
+        restoreOptions()
         let stack = UIStackView()
         stack.axis = .vertical
         stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
+        sourceButton = button("", action: nil)
+        targetButton = button("", action: nil)
+        toneButton = button("", action: nil)
+        let translateButton = button("Translate", action: #selector(translate))
+        translateButton.backgroundColor = .systemBlue
+        translateButton.setTitleColor(.white, for: .normal)
+        let toolbar = row([sourceButton, targetButton, toneButton, translateButton])
+        toolbar.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        stack.addArrangedSubview(toolbar)
         stack.addArrangedSubview(status)
-        stack.addArrangedSubview(row([button("오늘 뭐 했어?", action: #selector(insertExample)), button("Translate", action: #selector(translate))]))
-        for letters in ["qwertyuiop", "asdfghjkl", "zxcvbnm"] {
-            let buttons = letters.map { letter -> UIButton in
-                let key = button(String(letter), action: #selector(insertLetter(_:)))
-                key.accessibilityIdentifier = String(letter)
-                letterButtons.append(key)
-                return key
-            }
-            stack.addArrangedSubview(row(buttons))
-        }
-        shiftButton = button("⇧", action: #selector(toggleShift))
-        languageButton = button("한/영", action: #selector(toggleLanguage))
-        globe = button("🌐", action: nil)
-        globe.accessibilityLabel = "다음 키보드"
-        globe.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
-        stack.addArrangedSubview(row([globe, languageButton, shiftButton, button("space", action: #selector(insertSpace)), button("↵", action: #selector(insertNewline)), button("⌫", action: #selector(deleteCharacter))]))
-        stack.addArrangedSubview(row(["1", "2", "3", "?", "!", ".", ","].map { button($0, action: #selector(insertLiteral(_:))) }))
-        updateKeys()
+        status.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        keyRows.axis = .vertical
+        keyRows.spacing = 8
+        stack.addArrangedSubview(keyRows)
+        rebuildKeys()
+        updateMenus()
         view.addSubview(stack)
-        let height = view.heightAnchor.constraint(equalToConstant: 340)
+        let height = view.heightAnchor.constraint(equalToConstant: 300)
         height.priority = .defaultHigh
         NSLayoutConstraint.activate([
             height,
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
-            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
         ])
+    }
+
+    private func rebuildKeys() {
+        for row in keyRows.arrangedSubviews { keyRows.removeArrangedSubview(row); row.removeFromSuperview() }
+        letterButtons.removeAll()
+        let layouts = isNumbers
+            ? (alternateSymbols ? ["[]{}#%^*+=", "_\\|~<>€£¥", ".,?!'\";"] : ["1234567890", "-/:;()$&@", ".,?!'\";"])
+            : ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        for (index, letters) in layouts.enumerated() {
+            let buttons = letters.map { letter -> UIButton in
+                let key = button(String(letter), action: isNumbers ? #selector(insertLiteral(_:)) : #selector(insertLetter(_:)))
+                key.accessibilityIdentifier = String(letter)
+                if !isNumbers { letterButtons.append(key) }
+                return key
+            }
+            if index == 2 {
+                shiftButton = button(isNumbers ? "#+=" : "⇧", action: #selector(toggleShift))
+                shiftButton.accessibilityLabel = isNumbers ? "기호 페이지 전환" : "Shift"
+                let delete = button("⌫", action: #selector(deleteCharacter))
+                delete.accessibilityLabel = "삭제"
+                keyRows.addArrangedSubview(weightedRow([shiftButton] + buttons + [delete], weights: [1.4] + Array(repeating: 1, count: buttons.count) + [1.4]))
+            } else {
+                let keys = row(buttons)
+                keys.heightAnchor.constraint(equalToConstant: 42).isActive = true
+                if index == 1 {
+                    // Center the nine-key row with a half-key inset on either side.
+                    let container = UIView()
+                    keys.translatesAutoresizingMaskIntoConstraints = false
+                    container.addSubview(keys)
+                    NSLayoutConstraint.activate([
+                        keys.topAnchor.constraint(equalTo: container.topAnchor),
+                        keys.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+                        keys.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+                        keys.widthAnchor.constraint(equalTo: container.widthAnchor, multiplier: 0.9)
+                    ])
+                    keyRows.addArrangedSubview(container)
+                } else { keyRows.addArrangedSubview(keys) }
+            }
+        }
+        languageButton = button("한/영", action: #selector(toggleLanguage))
+        languageButton.accessibilityLabel = "한영 자판 전환"
+        numberButton = button(isNumbers ? (isKorean ? "가나다" : "ABC") : "123", action: #selector(toggleNumbers))
+        globe = button("🌐", action: nil)
+        globe.accessibilityLabel = "다음 키보드"
+        globe.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
+        globe.isHidden = !needsInputModeSwitchKey
+        let space = button(isKorean ? "스페이스" : "space", action: #selector(insertSpace))
+        let newline = button("↵", action: #selector(insertNewline))
+        newline.accessibilityLabel = "줄바꿈"
+        let bottom = weightedRow([numberButton, languageButton, space, newline], weights: [1.2, 1.1, 4.5, 1.7])
+        keyRows.addArrangedSubview(bottom)
+        // Keep the globe in a separate narrow area only when iOS requires it.
+        bottom.insertArrangedSubview(globe, at: 1)
+        let globeWidth = globe.widthAnchor.constraint(equalTo: numberButton.widthAnchor)
+        globeWidth.priority = .defaultHigh
+        globeWidth.isActive = true
+        updateKeys()
     }
 
     override func viewWillLayoutSubviews() {
@@ -64,7 +126,17 @@ final class KeyboardViewController: UIInputViewController {
         let row = UIStackView(arrangedSubviews: buttons)
         row.spacing = 4
         row.distribution = .fillEqually
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 32).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
+        return row
+    }
+
+    private func weightedRow(_ buttons: [UIButton], weights: [CGFloat]) -> UIStackView {
+        let row = self.row(buttons)
+        row.distribution = .fill
+        for index in 1..<buttons.count {
+            buttons[index].widthAnchor.constraint(equalTo: buttons[0].widthAnchor, multiplier: weights[index] / weights[0]).isActive = true
+        }
+        row.heightAnchor.constraint(equalToConstant: 42).isActive = true
         return row
     }
 
@@ -72,6 +144,8 @@ final class KeyboardViewController: UIInputViewController {
         let button = UIButton(type: .system)
         button.setTitle(title, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: 16)
+        button.titleLabel?.adjustsFontSizeToFitWidth = true
+        button.titleLabel?.minimumScaleFactor = 0.65
         button.backgroundColor = .secondarySystemBackground
         button.layer.cornerRadius = 6
         if let action = action { button.addTarget(self, action: action, for: .touchUpInside) }
@@ -93,7 +167,6 @@ final class KeyboardViewController: UIInputViewController {
         shifted = false
         updateKeys()
     }
-    @objc private func insertExample() { insertCommitted("오늘 뭐 했어?") }
     @objc private func insertSpace() { insertCommitted(" ") }
     @objc private func insertNewline() { insertCommitted("\n") }
     @objc private func insertLiteral(_ sender: UIButton) {
@@ -110,10 +183,23 @@ final class KeyboardViewController: UIInputViewController {
     @objc private func toggleLanguage() {
         commitComposition()
         isKorean.toggle()
+        isNumbers = false
         shifted = false
-        updateKeys()
+        rebuildKeys()
+        options.sourceLanguage = isKorean ? "ko" : "en"
+        saveOptions()
     }
-    @objc private func toggleShift() { shifted.toggle(); updateKeys() }
+    @objc private func toggleNumbers() {
+        commitComposition()
+        isNumbers.toggle()
+        alternateSymbols = false
+        shifted = false
+        rebuildKeys()
+    }
+    @objc private func toggleShift() {
+        if isNumbers { alternateSymbols.toggle(); rebuildKeys() }
+        else { shifted.toggle(); updateKeys() }
+    }
 
     private func updateKeys() {
         let normal = Array("ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔㅁㄴㅇㄹㅎㅗㅓㅏㅣㅋㅌㅊㅍㅠㅜㅡ")
@@ -124,6 +210,68 @@ final class KeyboardViewController: UIInputViewController {
         }
         shiftButton?.backgroundColor = shifted ? .systemGray3 : .secondarySystemBackground
         languageButton?.setTitle(isKorean ? "ABC" : "한글", for: .normal)
+    }
+
+    private func restoreOptions() {
+        let defaults = UserDefaults.standard
+        if let source = defaults.string(forKey: "sourceLanguage"),
+           TranslationOptions.sourceLanguages.contains(where: { $0.code == source }) {
+            options.sourceLanguage = source
+        }
+        if let target = defaults.string(forKey: "targetLanguage"),
+           TranslationOptions.targetLanguages.contains(where: { $0.code == target }) {
+            options.targetLanguage = target
+        }
+        if let raw = defaults.string(forKey: "translationTone"), let tone = TranslationOptions.Tone(rawValue: raw) {
+            options.tone = tone
+        }
+        isKorean = options.sourceLanguage == "ko"
+    }
+
+    private func saveOptions() {
+        // Extension-local preferences: no App Group or Full Access required.
+        let defaults = UserDefaults.standard
+        defaults.set(options.sourceLanguage, forKey: "sourceLanguage")
+        defaults.set(options.targetLanguage, forKey: "targetLanguage")
+        defaults.set(options.tone.rawValue, forKey: "translationTone")
+        updateMenus()
+    }
+
+    private func updateMenus() {
+        sourceButton.setTitle("\(options.sourceLanguage.uppercased()) ▾", for: .normal)
+        sourceButton.accessibilityLabel = "원문 언어"
+        sourceButton.menu = UIMenu(title: "원문 언어", children: TranslationOptions.sourceLanguages.map { language in
+            UIAction(title: language.name, state: language.code == options.sourceLanguage ? .on : .off) { [weak self] _ in
+                guard let self = self else { return }
+                self.commitComposition()
+                self.options.sourceLanguage = language.code
+                self.isKorean = language.code == "ko"
+                self.isNumbers = false
+                self.shifted = false
+                self.rebuildKeys()
+                self.saveOptions()
+            }
+        })
+        targetButton.setTitle("→ \(options.targetLanguage.uppercased()) ▾", for: .normal)
+        targetButton.accessibilityLabel = "번역 언어"
+        targetButton.menu = UIMenu(title: "번역 언어", children: TranslationOptions.targetLanguages.map { language in
+            UIAction(title: language.name, state: language.code == options.targetLanguage ? .on : .off) { [weak self] _ in
+                self?.commitComposition()
+                self?.options.targetLanguage = language.code
+                self?.saveOptions()
+            }
+        })
+        toneButton.setTitle(options.tone == .casual ? "일상체 ▾" : "정중체 ▾", for: .normal)
+        toneButton.accessibilityLabel = "번역 말투"
+        toneButton.menu = UIMenu(title: "번역 말투", children: [TranslationOptions.Tone.casual, .formal].map { tone in
+            UIAction(title: tone == .casual ? "일상체 (casual)" : "정중체 (formal)", state: tone == options.tone ? .on : .off) { [weak self] _ in
+                self?.commitComposition()
+                self?.options.tone = tone
+                self?.saveOptions()
+            }
+        })
+        for button in [sourceButton, targetButton, toneButton] { button?.showsMenuAsPrimaryAction = true }
+        status.text = "테스트 번역 · 실제 번역은 아직 연결되지 않았습니다."
     }
 
     private func insertCommitted(_ text: String) {
