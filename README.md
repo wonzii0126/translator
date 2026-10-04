@@ -6,7 +6,8 @@
 
 - `Translator.xcodeproj`: Translator 앱과 TranslatorKeyboard 확장 타깃. 앱이 확장에 의존하며 Embed App Extensions 단계에서 `.appex`를 포함합니다. 공유 Translator scheme이 있습니다.
 - `HostApp/AppDelegate.swift`: 설치 안내와 일반 UITextView 테스트 입력창.
-- `KeyboardExtension/KeyboardViewController.swift`: UIInputViewController, 문자/공백/삭제/줄바꿈, 예문, 키보드 전환, Translate 버튼.
+- `KeyboardExtension/KeyboardViewController.swift`: UIInputViewController, 한글 두벌식/영문 전환, 일회성 Shift, 공백/삭제/줄바꿈, 최소 숫자·문장부호, 예문, 키보드 전환, Translate 버튼.
+- `KeyboardExtension/HangulComposer.swift`: 초성·중성·종성, 복합 모음과 겹받침, 받침 이동 및 자모 단위 삭제. 조합 중 커서나 입력창이 바뀌면 기존 조합을 확정합니다. iOS의 제한된 문맥으로 기존 조합을 확인할 수 없으면 안전하게 확정합니다.
 - `KeyboardExtension/ConversationalTranslator.swift`: sourceLanguage, targetLanguage, casual/formal tone 옵션 및 로컬 테스트 구현.
 - 각 타깃의 `Info.plist`: 확장은 `com.apple.keyboard-service`와 principal class를 선언하고 `RequestsOpenAccess = false`로 설정합니다.
 
@@ -49,7 +50,10 @@ xcodebuild -project Translator.xcodeproj -scheme Translator \
 ## 기기에서 확인할 항목
 
 - 영문 키, space, 삭제, 줄바꿈이 활성 입력창에 반영되는지 확인합니다.
-- 기본 한국어 키보드로 원문을 작성한 후 Translator로 전환해도 Translate가 작동하는지 확인합니다. 이번 버전은 한글 조합 입력기를 구현하지 않으며 예문 버튼을 제공합니다.
+- Translator의 두벌식 자판에서 `오늘 뭐 했어?`를 직접 입력하고 Translate를 확인합니다. Shift로 `ㅆ`, 아래 문장부호 행으로 `?`를 입력합니다. ABC/한글 버튼으로 한영 전환합니다.
+- `각 → 가가`, `닭 → 달가`처럼 받침 뒤에 모음을 입력하는 경우와 `과 → 고 → ㄱ` 삭제를 확인합니다. 이미 확정된 글자는 글자 단위로 삭제됩니다.
+- 조합 중 커서를 다른 곳으로 이동하거나 다른 입력창으로 전환한 뒤 입력해도 이전 원문이 잘못 삭제되지 않는지 확인합니다. 같은 문맥 위치로 이동한 경우를 완벽히 구분하는 것은 이 프로토타입의 제한입니다.
+- 기본 한국어 키보드로 원문을 작성한 후 Translator로 전환해도 Translate가 작동하는지 확인합니다.
 - 빈 입력창에서는 Translate가 안내만 표시하는지 확인합니다.
 - 원문 중간에 커서를 놓거나 텍스트를 선택하면 안내가 표시되고 원문이 유지되는지 확인합니다.
 - 원문 끝에서는 줄바꿈과 테스트 문구만 추가되며 메시지는 전송되지 않는지 확인합니다. 원문이 이미 줄바꿈으로 끝나면 줄바꿈을 중복 추가하지 않습니다.
@@ -71,3 +75,5 @@ https://developer.apple.com/library/archive/documentation/General/Conceptual/Ext
 ## 검증 상태
 
 개발 환경은 Windows이며 Xcode/iOS SDK/Swift 컴파일러가 없습니다. plist 및 scheme XML, 프로젝트 참조와 타깃 연결을 정적으로 확인했지만 실제 컴파일 및 iPhone 실행은 미검증입니다. 위 Mac 빌드 명령과 수동 검증 절차로 확인해야 합니다.
+
+이후 첫 버전은 GitHub Actions에서 빌드됐으며 사용자가 AltServer로 설치한 iPhone의 Host App 및 KakaoTalk에서 테스트 번역문 추가를 확인했습니다. Sideloadly 설치에서는 확장 실행 시 CODESIGNING / Invalid Page 오류가 관찰됐습니다. 한글 입력 업데이트의 컴파일 및 기기 동작은 새 빌드로 별도 확인해야 합니다. GitHub Actions는 `Tests/HangulComposerChecks.swift`를 실제 Swift 컴파일러로 실행한 후 앱을 빌드합니다.

@@ -14,7 +14,16 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Build app and keyboard without signing
+      - name: Check Hangul composition
+        # Run the pure Swift composer checks on the Mac before building UIKit.
+        # No test target or third-party dependency is required.
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc KeyboardExtension/HangulComposer.swift Tests/HangulComposerChecks.swift -o "$RUNNER_TEMP/hangul-checks"
+          "$RUNNER_TEMP/hangul-checks"
+
+      - name: Build iOS app and extension
         shell: bash
         run: |
           set -euo pipefail
