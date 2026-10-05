@@ -22,6 +22,27 @@ test("classify intermittent provider failures without exposing upstream details"
       const response = await worker.fetch(request(), env);
       assert.deepEqual(await response.json(), { error: expected });
     }
+    globalThis.fetch = async () => new Response("secret provider diagnostic", { status: 400 });
+    assert.deepEqual(await (await worker.fetch(request(), env)).json(), {
+      error: "translation_service_error", diagnostic: "provider_http_400"
+    });
+    for (const [failure, diagnostic] of [
+      [{ message: "API key not valid. secret", status: "INVALID_ARGUMENT" }, "provider_key_invalid"],
+      [{ message: "Your API key was reported as leaked. secret" }, "provider_key_blocked"],
+      [{ message: "Free tier is not available in your country. secret" }, "provider_free_tier_unavailable"],
+      [{ message: "User location is not supported for the API use.", status: "FAILED_PRECONDITION" }, "provider_location_unsupported"],
+      [{ message: "private request text", status: "INVALID_ARGUMENT" }, "provider_invalid_argument"],
+      [{ message: "private request text", status: "FAILED_PRECONDITION" }, "provider_failed_precondition"]
+    ]) {
+      globalThis.fetch = async () => Response.json({ error: failure }, { status: 400 });
+      assert.deepEqual(await (await worker.fetch(request(), env)).json(), {
+        error: "translation_service_error", diagnostic
+      });
+    }
+    globalThis.fetch = async () => new Response("not JSON", { status: 200 });
+    assert.deepEqual(await (await worker.fetch(request(), env)).json(), {
+      error: "translation_service_error", diagnostic: "provider_json"
+    });
   } finally { globalThis.fetch = original; }
 });
 

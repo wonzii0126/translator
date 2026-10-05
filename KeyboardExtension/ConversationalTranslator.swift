@@ -32,6 +32,7 @@ struct TestConversationalTranslator: ConversationalTranslator {
 enum TranslationFailure: LocalizedError {
     case missingToken, unauthorized, limited, service, timeout, incomplete, tooLong
     case busy, providerAuthentication, modelUnavailable, blocked, outputLimit, notConfigured, invalidRequest
+    case diagnostic(Int, String)
     var errorDescription: String? {
         switch self {
         case .missingToken: return "설정에서 접속 토큰을 등록하세요."
@@ -48,6 +49,7 @@ enum TranslationFailure: LocalizedError {
         case .outputLimit: return "번역 출력 한도에 도달했습니다. 문장을 짧게 나눠주세요."
         case .notConfigured: return "서버의 Secret 설정 두 개를 확인하세요."
         case .invalidRequest: return "번역 요청이 유효하지 않습니다. 원문·언어 설정을 확인하세요."
+        case .diagnostic(let status, let code): return "서버 오류 \(status) · \(code)"
         }
     }
 }
@@ -93,14 +95,15 @@ struct BackendConversationalTranslator: ConversationalTranslator {
         let tone: String
     }
     private struct Result: Decodable { let translation: String }
-    private struct ErrorResult: Decodable { let error: String }
+    private struct ErrorResult: Decodable { let error: String; let diagnostic: String? }
 
     func translate(_ source: String, options: TranslationOptions) async throws -> String {
         guard source.unicodeScalars.count <= 1000 else { throw TranslationFailure.tooLong }
         guard let token = TranslationCredentials.load() else { throw TranslationFailure.missingToken }
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 25
+        // Leave time for the backend's 40-second provider deadline and network transit.
+        request.timeoutInterval = 45
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(Payload(text: source, sourceLanguage: options.sourceLanguage,
@@ -127,6 +130,11 @@ struct BackendConversationalTranslator: ConversationalTranslator {
             case "translation_not_completed", "invalid_translation_response": throw TranslationFailure.incomplete
             case "server_not_configured": throw TranslationFailure.notConfigured
             case "invalid_body", "invalid_translation_request", "json_required": throw TranslationFailure.invalidRequest
+            case "translation_service_error":
+                let code = error.diagnostic ?? "provider_unknown"
+                let allowed = ["provider_connection", "provider_json", "provider_result", "provider_unknown"]
+                let safe = allowed.contains(code) || code.range(of: "^provider_http_[0-9]{3}$", options: .regularExpression) != nil
+                throw TranslationFailure.diagnostic(http.statusCode, safe ? code : "provider_unknown")
             default: break
             }
         }
@@ -135,7 +143,7 @@ struct BackendConversationalTranslator: ConversationalTranslator {
         case 401: throw TranslationFailure.unauthorized
         case 429: throw TranslationFailure.limited
         case 504: throw TranslationFailure.timeout
-        default: throw TranslationFailure.service
+        default: throw TranslationFailure.diagnostic(http.statusCode, "server_response")
         }
         guard data.count <= 65536, let result = try? JSONDecoder().decode(Result.self, from: data),
               !result.translation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
