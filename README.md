@@ -1,5 +1,7 @@
 # Translator Keyboard — iOS 1차 프로토타입
 
+**현재 버전은 실제 번역 서버에 연결합니다.** 설치 및 토큰 등록은 `NETWORK_SETUP.md`를 따르세요. 아래 1차 프로토타입 안내 중 테스트 문구·전체 접근 불필요 설명은 초기 버전 기준입니다. 현재는 번역에 전체 접근과 개인 CLIENT_TOKEN이 필요하며, Gemini 키는 서버 Secret에만 저장합니다. 서버 설정은 `Backend/README.md`에 있습니다.
+
 빈 프로젝트에서 생성한 UIKit Host App + Custom Keyboard Extension입니다. iOS 16 이상을 대상으로 합니다. 외부 라이브러리, 네트워크, API Key, App Group, 전체 접근 권한을 사용하지 않습니다.
 
 ## 구성

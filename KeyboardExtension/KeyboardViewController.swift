@@ -1,7 +1,11 @@
 import UIKit
 
 final class KeyboardViewController: UIInputViewController {
-    private let translator: any ConversationalTranslator = TestConversationalTranslator()
+    private let translator: any ConversationalTranslator = BackendConversationalTranslator()
+    private var translationTask: Task<Void, Never>?
+    private var inputRevision = 0
+    private var translateButton: UIButton!
+    private var connectionButton: UIButton!
     private var options = TranslationOptions()
     private let status = UILabel()
     private var globe: UIButton!
@@ -35,12 +39,26 @@ final class KeyboardViewController: UIInputViewController {
         sourceButton = button("", action: nil)
         targetButton = button("", action: nil)
         toneButton = button("", action: nil)
-        let translateButton = button("Translate", action: #selector(translate))
+        translateButton = button("Translate", action: #selector(translate))
         translateButton.backgroundColor = .systemBlue
         translateButton.setTitleColor(.white, for: .normal)
         let toolbar = row([sourceButton, targetButton, toneButton, translateButton])
         toolbar.heightAnchor.constraint(equalToConstant: 34).isActive = true
         stack.addArrangedSubview(toolbar)
+        connectionButton = button("접속 설정 ▾", action: nil)
+        connectionButton.titleLabel?.font = .systemFont(ofSize: 12)
+        connectionButton.menu = UIMenu(title: "개인 번역 서버", children: [
+            UIAction(title: "복사한 CLIENT_TOKEN 등록") { [weak self] _ in self?.registerToken() },
+            UIAction(title: "저장한 토큰 삭제", attributes: .destructive) { [weak self] _ in
+                guard let self = self else { return }
+                self.inputRevision += 1
+                self.translationTask?.cancel()
+                self.status.text = TranslationCredentials.remove() ? "접속 토큰 삭제됨" : "토큰 삭제 실패"
+            }
+        ])
+        connectionButton.showsMenuAsPrimaryAction = true
+        connectionButton.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        stack.addArrangedSubview(connectionButton)
         stack.addArrangedSubview(status)
         status.heightAnchor.constraint(equalToConstant: 18).isActive = true
         keyRows.axis = .vertical
@@ -49,7 +67,7 @@ final class KeyboardViewController: UIInputViewController {
         rebuildKeys()
         updateMenus()
         view.addSubview(stack)
-        let height = view.heightAnchor.constraint(equalToConstant: 300)
+        let height = view.heightAnchor.constraint(equalToConstant: 330)
         height.priority = .defaultHigh
         NSLayoutConstraint.activate([
             height,
@@ -153,6 +171,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     @objc private func insertLetter(_ sender: UIButton) {
+        inputRevision += 1
         guard let text = sender.title(for: .normal), let key = text.first else { return }
         if isKorean {
             validateComposition()
@@ -173,6 +192,7 @@ final class KeyboardViewController: UIInputViewController {
         if let text = sender.title(for: .normal) { insertCommitted(text) }
     }
     @objc private func deleteCharacter() {
+        inputRevision += 1
         validateComposition()
         if composer.keys.isEmpty { textDocumentProxy.deleteBackward(); return }
         let previous = composer.text
@@ -229,6 +249,7 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func saveOptions() {
+        inputRevision += 1
         // Extension-local preferences: no App Group or Full Access required.
         let defaults = UserDefaults.standard
         defaults.set(options.sourceLanguage, forKey: "sourceLanguage")
@@ -271,10 +292,11 @@ final class KeyboardViewController: UIInputViewController {
             }
         })
         for button in [sourceButton, targetButton, toneButton] { button?.showsMenuAsPrimaryAction = true }
-        status.text = "테스트 번역 · 실제 번역은 아직 연결되지 않았습니다."
+        status.text = "Translate 시 커서 앞 원문을 Google로 전송합니다."
     }
 
     private func insertCommitted(_ text: String) {
+        inputRevision += 1
         commitComposition()
         textDocumentProxy.insertText(text)
     }
@@ -303,16 +325,28 @@ final class KeyboardViewController: UIInputViewController {
         composingDocument = textDocumentProxy.documentIdentifier
     }
     override func textWillChange(_ textInput: UITextInput?) {
+        inputRevision += 1
         super.textWillChange(textInput)
         commitComposition()
     }
     override func viewWillDisappear(_ animated: Bool) {
+        inputRevision += 1
+        translationTask?.cancel()
         commitComposition()
         super.viewWillDisappear(animated)
     }
 
     @objc private func translate() {
+        guard translationTask == nil else { return }
         commitComposition()
+        guard hasFullAccess else {
+            status.text = "설정 → 키보드 → Translator → 전체 접근 허용을 켜세요."
+            return
+        }
+        guard TranslationCredentials.load() != nil else {
+            status.text = "접속 설정에서 복사한 CLIENT_TOKEN을 등록하세요."
+            return
+        }
         // Only the active input field's limited context is available, not chat history.
         let proxy = textDocumentProxy
         guard proxy.selectedText?.isEmpty != false,
@@ -325,8 +359,51 @@ final class KeyboardViewController: UIInputViewController {
             status.text = "먼저 원문을 입력하세요."
             return
         }
-        let result = translator.translate(source, options: options)
-        proxy.insertText((source.hasSuffix("\n") ? "" : "\n") + result)
-        status.text = "테스트 번역문 추가됨 · 전송은 직접 누르세요."
+        let document = proxy.documentIdentifier
+        let after = proxy.documentContextAfterInput
+        let revision = inputRevision
+        let selectedOptions = options
+        translateButton.isEnabled = false
+        translateButton.setTitle("번역 중…", for: .normal)
+        status.text = "커서 앞 원문 번역 중 · 입력하면 결과 삽입을 취소합니다."
+        translationTask = Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            defer {
+                self.translationTask = nil
+                self.translateButton.isEnabled = true
+                self.translateButton.setTitle("Translate", for: .normal)
+            }
+            do {
+                let result = try await self.translator.translate(source, options: selectedOptions)
+                try Task.checkCancellation()
+                let current = self.textDocumentProxy
+                guard self.hasFullAccess, self.inputRevision == revision, self.options == selectedOptions,
+                      current.documentIdentifier == document, current.documentContextBeforeInput == source,
+                      current.documentContextAfterInput == after, current.selectedText?.isEmpty != false else {
+                    self.status.text = "입력이나 설정이 바뀌어 삽입 취소됨. 다시 Translate를 누르세요."
+                    return
+                }
+                current.insertText((source.hasSuffix("\n") ? "" : "\n") + result)
+                self.status.text = "번역문 추가됨 · 전송은 직접 누르세요."
+            } catch {
+                if Task.isCancelled { self.status.text = "번역 취소됨" }
+                else if let failure = error as? TranslationFailure { self.status.text = failure.localizedDescription }
+                else { self.status.text = "네트워크 연결을 확인하고 다시 시도하세요." }
+            }
+        }
+    }
+
+    private func registerToken() {
+        guard hasFullAccess else { status.text = "토큰 등록과 번역에는 전체 접근 허용이 필요합니다."; return }
+        // Read the clipboard only in response to this explicit menu action.
+        guard let token = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+              token.count >= 32, token.count <= 256,
+              !token.contains(where: { $0.isWhitespace }), !token.hasPrefix("AIza") else {
+            status.text = "Gemini 키가 아닌, 생성한 CLIENT_TOKEN을 복사하세요."
+            return
+        }
+        inputRevision += 1
+        translationTask?.cancel()
+        status.text = TranslationCredentials.save(token) ? "접속 토큰 저장됨 · 이제 Translate를 누르세요." : "토큰 저장 실패. 설치·서명 설정을 확인하세요."
     }
 }

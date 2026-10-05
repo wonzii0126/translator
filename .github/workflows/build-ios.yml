@@ -22,6 +22,8 @@ jobs:
           set -euo pipefail
           swiftc KeyboardExtension/HangulComposer.swift Tests/HangulComposerChecks.swift -o "$RUNNER_TEMP/hangul-checks"
           "$RUNNER_TEMP/hangul-checks"
+          swiftc -typecheck KeyboardExtension/ConversationalTranslator.swift
+          node --test Backend/worker.test.mjs
 
       - name: Build iOS app and extension
         shell: bash
