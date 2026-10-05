@@ -31,6 +31,7 @@ struct TestConversationalTranslator: ConversationalTranslator {
 
 enum TranslationFailure: LocalizedError {
     case missingToken, unauthorized, limited, service, timeout, incomplete, tooLong
+    case busy, providerAuthentication, modelUnavailable, blocked, outputLimit, notConfigured, invalidRequest
     var errorDescription: String? {
         switch self {
         case .missingToken: return "설정에서 접속 토큰을 등록하세요."
@@ -40,6 +41,13 @@ enum TranslationFailure: LocalizedError {
         case .timeout: return "번역 시간이 초과됐습니다."
         case .incomplete: return "완성된 번역 결과를 받지 못했습니다."
         case .tooLong: return "원문은 최대 1,000자까지 번역할 수 있습니다."
+        case .busy: return "Google 번역 서비스가 일시적으로 바쁩니다. 잠시 후 다시 시도하세요."
+        case .providerAuthentication: return "서버의 Gemini API Key 또는 권한을 확인하세요."
+        case .modelUnavailable: return "선택한 번역 모델을 사용할 수 없습니다."
+        case .blocked: return "Google이 이 문장의 번역 결과를 제공하지 않았습니다."
+        case .outputLimit: return "번역 출력 한도에 도달했습니다. 문장을 짧게 나눠주세요."
+        case .notConfigured: return "서버의 Secret 설정 두 개를 확인하세요."
+        case .invalidRequest: return "번역 요청이 유효하지 않습니다. 원문·언어 설정을 확인하세요."
         }
     }
 }
@@ -85,6 +93,7 @@ struct BackendConversationalTranslator: ConversationalTranslator {
         let tone: String
     }
     private struct Result: Decodable { let translation: String }
+    private struct ErrorResult: Decodable { let error: String }
 
     func translate(_ source: String, options: TranslationOptions) async throws -> String {
         guard source.unicodeScalars.count <= 1000 else { throw TranslationFailure.tooLong }
@@ -107,6 +116,20 @@ struct BackendConversationalTranslator: ConversationalTranslator {
         do { (data, response) = try await session.data(for: request) }
         catch let error as URLError where error.code == .timedOut { throw TranslationFailure.timeout }
         guard let http = response as? HTTPURLResponse else { throw TranslationFailure.service }
+        if http.statusCode != 200, data.count <= 65536,
+           let error = try? JSONDecoder().decode(ErrorResult.self, from: data) {
+            switch error.error {
+            case "translation_service_busy": throw TranslationFailure.busy
+            case "provider_authentication_failed": throw TranslationFailure.providerAuthentication
+            case "model_unavailable": throw TranslationFailure.modelUnavailable
+            case "translation_blocked": throw TranslationFailure.blocked
+            case "translation_output_limit": throw TranslationFailure.outputLimit
+            case "translation_not_completed", "invalid_translation_response": throw TranslationFailure.incomplete
+            case "server_not_configured": throw TranslationFailure.notConfigured
+            case "invalid_body", "invalid_translation_request", "json_required": throw TranslationFailure.invalidRequest
+            default: break
+            }
+        }
         switch http.statusCode {
         case 200: break
         case 401: throw TranslationFailure.unauthorized

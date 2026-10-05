@@ -8,6 +8,23 @@ const request = (body = payload, token = env.CLIENT_TOKEN) => new Request("https
   method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body)
 });
 
+test("classify intermittent provider failures without exposing upstream details", async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [status, expected] of [[503, "translation_service_busy"], [403, "provider_authentication_failed"], [404, "model_unavailable"]]) {
+      globalThis.fetch = async () => new Response("secret diagnostic", { status });
+      const response = await worker.fetch(request(), env);
+      assert.equal(response.status, 502);
+      assert.deepEqual(await response.json(), { error: expected });
+    }
+    for (const [finishReason, expected] of [["SAFETY", "translation_blocked"], ["MAX_TOKENS", "translation_output_limit"]]) {
+      globalThis.fetch = async () => Response.json({ candidates: [{ finishReason }] });
+      const response = await worker.fetch(request(), env);
+      assert.deepEqual(await response.json(), { error: expected });
+    }
+  } finally { globalThis.fetch = original; }
+});
+
 test("reject missing configuration, unauthorized and invalid input without upstream requests", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = () => { throw new Error("Should not call upstream"); };

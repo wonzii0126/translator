@@ -83,9 +83,16 @@ export default {
         })
       });
       if (response.status === 429) return reply(429, { error: "free_limit_or_capacity_reached" });
+      if ([500, 502, 503, 504].includes(response.status)) return reply(502, { error: "translation_service_busy" });
+      if ([401, 403].includes(response.status)) return reply(502, { error: "provider_authentication_failed" });
+      if (response.status === 404) return reply(502, { error: "model_unavailable" });
       if (!response.ok) return reply(502, { error: "translation_service_error" });
       const data = await response.json();
       const candidate = data.candidates?.[0];
+      if (data.promptFeedback?.blockReason || ["SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "RECITATION"].includes(candidate?.finishReason)) {
+        return reply(502, { error: "translation_blocked" });
+      }
+      if (candidate?.finishReason === "MAX_TOKENS") return reply(502, { error: "translation_output_limit" });
       if (candidate?.finishReason !== "STOP") return reply(502, { error: "translation_not_completed" });
       const translation = candidate.content?.parts?.filter(part => !part.thought && typeof part.text === "string")
         .map(part => part.text).join("").trim();
